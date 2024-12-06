@@ -1,12 +1,18 @@
-const express = require('express');
-const { graphqlHTTP } = require('express-graphql');
-const { buildSchema } = require('graphql');
+const express = require('express')
+const { graphqlHTTP } = require('express-graphql')
+const mongoose = require('mongoose')
+const { buildSchema } = require('graphql')
+
+const User = require('./models/User')
+const Post = require('./models/Post')
+
+// Création du serveur Express
+const app = express()
 
 // Connexion à la base de données
-const mongoose = require('mongoose')
-
 mongoose.Promise = Promise
 mongoose.connect('mongodb+srv://admin:admin@cluster0.0dfnl.mongodb.net/graphql?retryWrites=true&w=majority&appName=Cluster0')
+
 
 const db = mongoose.connection
 db.on('error', console.error.bind(console, 'connection error: '))
@@ -15,131 +21,149 @@ db.once('open', () => console.log('status: ', db.states[db._readyState]))
 
 // Schéma GraphQL
 const schema = buildSchema(`
-  type Query {
-    user(id: ID!): User
-    usersByName(name: String!): [User]
-    post(id: ID!): Post
-    posts: [Post]
-  }
 
-  type Mutation {
-    addPost(
-      title: String!, 
-      content: String!, 
-      authorId: ID!
-    ): Post
-    addUser(
-      name: String!,
-      email: String!,
-      posts: [PostInput]
-    ): User
-    addComment( 
-      content: String!, 
-      authorId: ID!
-    ): Comment
-  }
-
-  input PostInput {
-    title: String!
-    content: String!
-    authorId: ID!
-  }
-
-  type User {
+   type User {
     id: ID!
-    name: String
-    email: String
-    posts: [Post]
+    username: String!
+    email: String!
+    followers: [User]
   }
 
   type Post {
     id: ID!
-    title: String
+    title: String!
     content: String
     author: User
-    comments: [Comment]
+    likes: [User]
   }
 
-  type Comment {
-    id: ID!
-    content: String
-    author: User
+  type Query {
+    user(id: ID!): User
+    users: [User]
+    post(id: ID!): Post
+    posts: [Post]
+    userPosts(userId: ID!): [Post]
+  }
+
+  type Mutation {
+    addUser(username: String!, email: String!): User
+    createPost(title: String!, content: String, authorId: ID): Post
+    followUser(userId: ID!, followId: ID!): User
+    likePost(userId: ID!, postId: ID!): Post
   }
 `);
 
-//Données simulées
-const users = [
-  { id: "0", name: 'Alice', email: 'alice@example.com' },
-  { id: "1", name: 'Bob', email: 'bob@example.com' }
-];
-
-const posts = [
-  { id: "0", title: 'Alice', content: 'contenu pour alice', author: "0" },
-];
-
-const comments = [
-  { id: "0", content: 'très joli !', author: "1" },
-];
 
 //Résolveurs
-
 const root = {
   // Route pour chercher un user en particulier grâce à son id
-  user: ({ id }) => {
-    const user = users.find(user => user.id === id);
-    if (user) {
-      user.posts = posts.filter(post => post.author === user.id);
+  user: async ({ id }) => {
+    const user = await User.findById(id)
+    return {
+      ...user._doc,
+      id: user._id
     }
-    return user;
   },
 
-  // Route pour trouver un user en particulier grâce à son nom
-  usersByName: ({ name }) => {
-    return users.filter(user => user.name.toLowerCase().includes(name.toLowerCase()));
-  },
-
-  // Route pour trouver un poste en particulier grâce à son id
-  post: ({ id }) => {
-    const post = posts.find(post => post.id === id);
-    if (post) {
-      post.author = users.find(user => user.id === post.author);
-    }
-    return post;
-  },
-
-  // Route pour récupérer tous les postes d'un utilisateur en particulier grâce à son id
-  posts: () => {
-    return posts.map(post => {
-      return {
-        ...post,
-        author: users.find(user => user.id === post.author)
-      };
-    });
+  // Route pour chercher tous les users
+  users: async () => {
+    const users = await User.find()
+    return users.map(user => ({
+      ...user._doc,
+      id: user._id
+    }))
   },
 
   // Route pour ajouter un user
-  addUser: ({ name, email }) => {
-    const newUser = { id: String(users.length + 1), name, email };
-    users.push(newUser);
-    return newUser;
+  addUser: async ({ username, email }) => {
+    const user = new User({
+      username,
+      email
+    }) 
+    await user.save()
+    return {
+      ...user._doc,
+      id: user._id
+    }
   },
 
-   // Route pour ajouter un post
-  addPost: ({ title, content, authorId }) => {
-    const newPost = { id: String(posts.length + 1), title, content, author: authorId };
-    posts.push(newPost);
-    return newPost;
+  createPost: async ({ title, content, authorId}) => {
+    const post = new Post({
+      title, 
+      content,
+      author: authorId
+    })
+    await post.save()
+    return {
+      ...post._doc,
+      id: post._id,
+      author: async () => {
+        return await User.findById(authorId)
+      }
+    }
   },
-   // Route pour ajouter un comment
-  addComment: ({ content, authorId }) => {
-    const newComment = { id: String(posts.length + 1), content, author: authorId };
-    comments.push(newComment);
-    return newComment;
+
+  userPosts: async ({userId}) => {
+    const posts = await Post.find({ author: userId})
+    return posts.map(post => ({
+      ...post._doc,
+      id: post._id,
+      author: async () => {
+        return await User.findById(post.author)
+      },
+      likes: async () => {
+        return await User.find({ _id: { $in: post.likes } })
+      }
+    }))
+  },
+
+  post: async ({id}) => {
+    const post = await Post.findById(id)
+    return {
+      ...post._doc,
+      id: post._id,
+      author: async () => {
+        return await User.findById(post.author)
+      },
+      likes: async () => {
+        return await User.find({ _id: { $in: post.likes } })
+      }
+    }
+  },
+
+  posts: async () => {
+    const posts = await Post.find()
+    return posts.map(post => ({
+      ...post._doc,
+      id: post._id,
+      author: async () => {
+        return await User.findById(post.author)
+      },
+      likes: async () => {
+        return await User.find({ _id: { $in: post.likes } })
+      }
+    }))
+  },
+
+  likePost: async ({postId, userId}) => {
+    const post = await Post.findByIdAndUpdate(
+      postId,
+      { $push: { likes: userId } },
+      { new: true }
+    )
+    return {
+      ...post._doc,
+      id: post._id,
+      author: async () => {
+        return await User.findById(post.author)
+      },
+      likes: async () => {
+        return await User.find({ _id: { $in: post.likes } })
+      }
+    }
   }
 };
 
-// Création du serveur Express
-const app = express();
 app.use('/graphql', graphqlHTTP({
   schema: schema,
   rootValue: root,

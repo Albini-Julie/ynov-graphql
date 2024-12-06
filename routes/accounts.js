@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
-const modelAccount = require('../models/accounts')
-const account = require('../models/accounts')
+const modelAccount = require('../models/User')
+const account = require('../models/User')
 
 
 // Déclaration de ma route par défaut http://localhost:3000/api/items
