@@ -27,6 +27,8 @@ const schema = buildSchema(`
     username: String!
     email: String!
     followers: [User]
+    followersCount: Int!
+    followingCount: Int!
   }
 
   type Post {
@@ -45,6 +47,11 @@ const schema = buildSchema(`
     userPosts(userId: ID!): [Post]
   }
 
+  type UserStats {
+    followersCount: Int!
+    followingCount: Int!
+  }
+
   type Mutation {
     addUser(username: String!, email: String!): User
     createPost(title: String!, content: String, authorId: ID): Post
@@ -61,7 +68,22 @@ const root = {
     const user = await User.findById(id)
     return {
       ...user._doc,
-      id: user._id
+      id: user._id,
+      followers: async () => {
+        return await User.find({ _id: { $in: user.followers } })
+      },
+      followersCount: user.followers.length,
+
+      // -- Comprendre la requête followingCount
+      // 1. followers: user._id => cherche tous les utilisateurs qui ont notre utilisateur dans leur liste de followers
+      // 2. User.countDocuments => compte simplement le nombre de document (utilisateurs) qui correspondent à ce critère
+
+      followingCount: async () => {
+        const followingCount = await User.countDocuments({
+          followers: user._id
+        })
+        return followingCount
+      }
     }
   },
 
@@ -70,8 +92,18 @@ const root = {
     const users = await User.find()
     return users.map(user => ({
       ...user._doc,
-      id: user._id
-    }))
+      id: user._id,
+      followers: async () => {
+        return await User.find({ _id: { $in: user.followers } })
+      },
+      followersCount: user.followers.length,
+      followingCount: async () => {
+        const followingCount = await User.countDocuments({
+        followers: user._id
+      })
+      return followingCount
+    }
+  }))
   },
 
   // Route pour ajouter un user
@@ -159,6 +191,21 @@ const root = {
       },
       likes: async () => {
         return await User.find({ _id: { $in: post.likes } })
+      }
+    }
+  },
+
+  followUser: async ({followId, userId}) => {
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $push: { followers: followId} },
+      { new: true}
+    )
+    return {
+      ...user._doc,
+      id: user._id,
+      followers: async () => {
+        return await User.find({ _id: { $in: user.followers } })
       }
     }
   }
